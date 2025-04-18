@@ -1,198 +1,153 @@
 import streamlit as st
-from supabase import create_client, Client
-from dotenv import load_dotenv
 import openai
-import os
 import requests
 from io import BytesIO
-import razorpay
-import bcrypt
-import pandas as pd
+from dotenv import load_dotenv
+import os
 
-# Load environment variables
+# Load environment variables from the .env file
 load_dotenv()
 
-# API keys
+# Set the OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
-razorpay_client = razorpay.Client(auth=(os.getenv("RAZORPAY_KEY_ID"), os.getenv("RAZORPAY_KEY_SECRET")))
 
-# Supabase setup
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_API_KEY)
-
-# --- Functions ---
-
-def generate_ad(product_name, target_audience, tone, key_features, product_description):
+# Function to generate ad copy
+def generate_ad_copy(product_name, target_audience, tone, key_features, product_description):
     try:
-        prompt = f"Create a catchy tagline and description for a product. The product is {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Highlight its comfort, sustainability, and performance."
+        # Construct the prompt for ad copy
+        prompt = f"Create a catchy tagline and description for a product. The product is {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Emphasize comfort, sustainability, and performance."
+        
+        # Send the request to GPT-4 using the correct endpoint for chat models
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an assistant that generates ad copy."},
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "system", "content": "You are a helpful assistant that generates ad copy."},
+                      {"role": "user", "content": prompt}],
             max_tokens=150
         )
-        return response['choices'][0]['message']['content'].strip()
+        
+        ad_copy = response['choices'][0]['message']['content'].strip()
+        return ad_copy
+
     except Exception as e:
         return f"Error: {e}"
 
-def generate_ab_test(product_name, target_audience, tone, key_features, product_description):
-    try:
-        prompt_a = f"Create an ad for {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Make it catchy and engaging."
-        prompt_b = f"Create a different ad for {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Focus on benefits and quality."
-
-        ad_a = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt_a}],
-            max_tokens=150
-        )
-        ad_b = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt_b}],
-            max_tokens=150
-        )
-        return ad_a['choices'][0]['message']['content'].strip(), ad_b['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        return f"Error: {e}", None
-
+# Function to generate image for the ad
 def generate_image(prompt, num_images=1):
     try:
-        response = openai.Image.create(prompt=prompt, n=num_images, size="1024x1024")
-        return [img['url'] for img in response['data']]
-    except Exception as e:
-        return [f"Error: {e}"]
+        # Request image generation from DALL·E
+        response = openai.Image.create(
+            prompt=prompt,
+            n=num_images,  # Number of images to generate
+            size="1024x1024"  # Image size
+        )
 
+        # Get URLs of generated images
+        image_urls = [image['url'] for image in response['data']]
+        return image_urls
+
+    except Exception as e:
+        return f"Error: {e}"
+
+# Function to download image
 def download_image(image_url):
     try:
+        # Request image from URL
         response = requests.get(image_url)
-        return BytesIO(response.content)
+        img = BytesIO(response.content)
+        return img
     except Exception as e:
         return f"Error downloading image: {e}"
 
-# --- Streamlit UI ---
-st.title("Ad Gen using AI")
-menu = ["Login", "Sign Up"]
-choice = st.sidebar.selectbox("Menu", menu)
+# Function for A/B Testing
+def generate_ab_test_ads(product_name, target_audience, tone, key_features, product_description):
+    try:
+        # Create two different prompts for the A/B test
+        prompt_a = f"Create an ad for {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Make it catchy and engaging."
+        prompt_b = f"Create a different ad for {product_name}. Target audience: {target_audience}. Tone: {tone}. Key features: {key_features}. Description: {product_description}. Focus on benefits and quality."
+        
+        # Generate two variations of ad copy
+        ad_a = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a helpful assistant that generates ad copy."},
+                      {"role": "user", "content": prompt_a}],
+            max_tokens=150
+        )
+        
+        ad_b = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a helpful assistant that generates ad copy."},
+                      {"role": "user", "content": prompt_b}],
+            max_tokens=150
+        )
+        
+        # Extract and return both ad versions
+        ad_a_copy = ad_a['choices'][0]['message']['content'].strip()
+        ad_b_copy = ad_b['choices'][0]['message']['content'].strip()
+        
+        return ad_a_copy, ad_b_copy
 
-# --- Sign Up ---
-if choice == "Sign Up":
-    st.subheader("Create a New Account")
-    full_name = st.text_input("Full Name")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    except Exception as e:
+        return f"Error: {e}"
 
-    if st.button("Sign Up"):
-        try:
-            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-            user = supabase.auth.sign_up({"email": email, "password": password})
-            supabase.table("users").insert({
-                "full_name": full_name,
-                "email": email,
-                "password": hashed_password.decode('utf-8')
-            }).execute()
-            st.success("Account created! You can now log in.")
-        except Exception as e:
-            st.error(f"Signup Error: {e}")
+# Streamlit Frontend
+st.title("AI Ad Generator")
+st.write("Generate creative ads for your products or services using AI!")
 
-# --- Login ---
-elif choice == "Login":
-    st.subheader("Login to Your Account")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+# Input fields for the product details
+product_name = st.text_input("Product Name", placeholder="e.g., Eco-friendly water bottle")
+target_audience = st.text_input("Target Audience", placeholder="e.g., Health-conscious individuals")
+tone = st.selectbox("Ad Tone", ["Professional", "Friendly", "Humorous", "Inspirational"])
+key_features = st.text_area("Key Features (separate with commas)", placeholder="e.g., Lightweight, Sustainable, Stylish")
+product_description = st.text_area("Product Description", placeholder="e.g., Made from recyclable materials and perfect for active lifestyles")
 
-    if st.button("Login"):
-        try:
-            user = supabase.auth.sign_in_with_password({"email": email, "password": password})
-            st.session_state["user"] = user
-            st.session_state["email"] = email
+# A/B Testing Option
+ab_test_choice = st.selectbox("Do you want to perform A/B testing on the ad copy?", ["No", "Yes"])
 
-            admin_check = supabase.table("admins").select("*").eq("email", email).execute()
-            if admin_check.data:
-                st.success("Welcome Admin!")
-                st.title("Admin Dashboard")
+# Ask if the user wants to generate an image
+generate_image_choice = st.selectbox("Do you want to generate an image for your ad?", ["No", "Yes"])
 
-                ads_data = supabase.table("ads").select("*").execute()
-                ads = ads_data.data
+# Image description input box, appears only if the user chooses "Yes" to generate an image
+image_description = None
+num_images = 1
+if generate_image_choice == "Yes":
+    image_description = st.text_input("Enter the image description", placeholder="e.g., Eco-friendly water bottle on a green background")
+    num_images = st.slider("Number of Images to Generate", min_value=1, max_value=5, value=1)
 
-                if ads:
-                    df = pd.DataFrame(ads)
-
-                    # 1. Total Ads
-                    st.metric("📢 Total Ads Created", len(df))
-
-                    # 2. Top Users
-                    st.subheader("👥 Top Users by Ad Count")
-                    st.bar_chart(df['user_email'].value_counts().head(5))
-
-                    # 3. Popular Tones
-                    st.subheader("🎙️ Most Popular Tones")
-                    st.bar_chart(df['tone'].value_counts())
-
-                    # 4. Product Names
-                    st.subheader("🛍️ Most Used Product Names")
-                    st.dataframe(df['product_name'].value_counts().head(5))
-
-                    # 5. Recent Ads
-                    st.subheader("🕒 Recent Ads")
-                    st.dataframe(df.sort_values(by="created_at", ascending=False).head(5))
-
-                else:
-                    st.info("No ads created yet.")
-            else:
-                st.success("Login successful!")
-
-        except Exception as e:
-            st.error(f"Login Error: {e}")
-
-# --- User Section ---
-if "user" in st.session_state and st.session_state["email"] != "admin@gmail.com":
-    user_email = st.session_state["email"]
-    st.sidebar.success(f"Welcome {user_email}!")
-
-    st.subheader("Generate Your Ad")
-
-    product_name = st.text_input("Product Name")
-    target_audience = st.text_input("Target Audience")
-    tone = st.selectbox("Ad Tone", ["Professional", "Friendly", "Humorous", "Inspirational"])
-    key_features = st.text_area("Key Features")
-    product_description = st.text_area("Product Description")
-    ab_test_choice = st.selectbox("Do you want to perform A/B testing?", ["No", "Yes"])
-    generate_image_choice = st.selectbox("Generate Image?", ["No", "Yes"])
-
-    if generate_image_choice == "Yes":
-        image_description = st.text_input("Image Description")
-        num_images = st.slider("Number of Images", 1, 5, 1)
-
-    if st.button("Generate Ad, Image, and Video"):
+# Button to generate both ad copy and image
+if st.button("Generate Ad, Image, and Video"):
+    if generate_image_choice == "Yes" and not image_description:
+        st.error("Please provide an image description to generate the image.")
+    else:
+        # Generate ad copy
         if ab_test_choice == "Yes":
-            ad_a, ad_b = generate_ab_test(product_name, target_audience, tone, key_features, product_description)
-            st.subheader("Ad A")
+            ad_a, ad_b = generate_ab_test_ads(product_name, target_audience, tone, key_features, product_description)
+            st.subheader("Ad A - Version 1")
             st.write(ad_a)
-            st.subheader("Ad B")
+            st.subheader("Ad B - Version 2")
             st.write(ad_b)
-            final_ad = ad_a + "\n---\n" + ad_b
         else:
-            ad = generate_ad(product_name, target_audience, tone, key_features, product_description)
-            st.subheader("Your Ad")
-            st.write(ad)
-            final_ad = ad
+            ad_text = generate_ad_copy(product_name, target_audience, tone, key_features, product_description)
+            st.subheader("Your Generated Ad")
+            st.write(ad_text)
 
-        supabase.table("ads").insert({
-            "user_email": user_email,
-            "product_name": product_name,
-            "target_audience": target_audience,
-            "tone": tone,
-            "key_features": key_features,
-            "product_description": product_description,
-            "generated_ad": final_ad
-        }).execute()
+        # Video generation notice
+        st.subheader("Video Ad Generation")
+        st.write("We are currently working on integrating video generation. Stay tuned for future updates!")
 
         if generate_image_choice == "Yes":
+            # Generate the images
             image_urls = generate_image(image_description, num_images)
-            st.subheader("Generated Images")
-            for i, url in enumerate(image_urls):
-                st.image(url, caption=f"Image {i+1}")
+
+            # Display generated images
+            st.subheader(f"Generated {num_images} Image(s)")
+            for i, url in enumerate(image_urls, 1):
+                st.image(url, caption=f"Image {i}", use_column_width=True)
+
+                # Download image button
                 img = download_image(url)
-                st.download_button(f"Download Image {i+1}", data=img, file_name=f"image_{i+1}.png", mime="image/png")
+                st.download_button(
+                    label=f"Download Image {i}",
+                    data=img,
+                    file_name=f"image_{i}.png",
+                    mime="image/png"
+                )
